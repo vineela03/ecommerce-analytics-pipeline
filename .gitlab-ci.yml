@@ -24,11 +24,11 @@ build:data-export:
   before_script:
     - docker info
   script:
-    - echo "🔨 Building data-export Docker image..."
+    - echo "Building data-export Docker image..."
     - cd data-export
     - docker build -t data-export:${CI_COMMIT_SHORT_SHA} -t data-export:latest .
     - docker save data-export:latest -o ../data-export-image.tar
-    - echo "✅ data-export image built successfully"
+    - echo "data-export image built successfully"
     - ls -lh ../data-export-image.tar
   artifacts:
     paths:
@@ -53,11 +53,11 @@ build:dbt:
   before_script:
     - docker info
   script:
-    - echo "🔨 Building dbt Docker image..."
+    - echo "Building dbt Docker image..."
     - cd dbt-project
     - docker build -t dbt:${CI_COMMIT_SHORT_SHA} -t dbt:latest .
     - docker save dbt:latest -o ../dbt-image.tar
-    - echo "✅ dbt image built successfully"
+    - echo "dbt image built successfully"
     - ls -lh ../dbt-image.tar
   artifacts:
     paths:
@@ -83,11 +83,11 @@ test:dbt-parse:
   image: ghcr.io/dbt-labs/dbt-postgres:1.9.0
   before_script:
     - cd dbt-project
-    - echo "dbt version:" && dbt --version
+    - dbt --version
   script:
-    - echo "🔍 Parsing dbt project structure..."
+    - echo "Parsing dbt project structure..."
     - dbt parse
-    - echo "✅ dbt project structure validated"
+    - echo "dbt project structure validated"
   only:
     - main
     - develop
@@ -104,11 +104,10 @@ test:dbt-compile:
     - export POSTGRES_PASSWORD=test_pass
     - export POSTGRES_DB=test_db
   script:
-    - echo "🔍 Compiling dbt models..."
+    - echo "Compiling dbt models..."
     - dbt deps || echo "No dependencies to install"
     - dbt compile --target test || echo "Compilation completed"
-    - echo "✅ dbt models compiled successfully"
-    - echo "Models compiled:" && find target/compiled -name "*.sql" | wc -l
+    - echo "dbt models compiled successfully"
   artifacts:
     paths:
       - dbt-project/target/
@@ -125,11 +124,10 @@ test:yaml-lint:
   before_script:
     - pip install yamllint --quiet
   script:
-    - echo "🔍 Linting YAML files..."
+    - echo "Linting YAML files..."
     - yamllint kubernetes/ || echo "Kubernetes YAML lint completed"
     - yamllint dbt-project/models/*.yml || echo "dbt YAML lint completed"
-    - yamllint .gitlab-ci.yml || echo "GitLab CI YAML lint completed"
-    - echo "✅ YAML validation completed"
+    - echo "YAML validation completed"
   allow_failure: true
   only:
     - main
@@ -142,15 +140,14 @@ test:python-lint:
   before_script:
     - pip install flake8 --quiet
   script:
-    - echo "🔍 Linting Python files..."
+    - echo "Linting Python files..."
     - flake8 data-export/ --max-line-length=120 --exclude=__pycache__ || echo "Python lint completed"
-    - echo "✅ Python validation completed"
+    - echo "Python validation completed"
   allow_failure: true
   only:
     - main
     - develop
     - merge_requests
-  needs: []
 
 # ============================================
 # DOCUMENTATION GENERATION
@@ -164,17 +161,15 @@ docs:dbt:
   before_script:
     - cd dbt-project
   script:
-    - echo "📚 Generating dbt documentation..."
+    - echo "Generating dbt documentation..."
     - dbt docs generate --target test || echo "Documentation generated"
-    - echo "✅ dbt documentation generated"
+    - echo "dbt documentation generated"
     - ls -lh target/
   artifacts:
     name: "dbt-docs-${CI_COMMIT_SHORT_SHA}"
     paths:
       - dbt-project/target/
     expire_in: 30 days
-    reports:
-      dotenv: dbt-project/target/manifest.json
   only:
     - main
     - develop
@@ -187,47 +182,25 @@ pipeline:summary:
   stage: .post
   image: alpine:latest
   script:
-    - echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    - echo "✅ CI/CD Pipeline Completed Successfully!"
-    - echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    - echo ""
-    - echo "📊 Pipeline Summary:"
-    - echo "  📦 Commit SHA: ${CI_COMMIT_SHORT_SHA}"
-    - echo "  🌿 Branch: ${CI_COMMIT_REF_NAME}"
-    - echo "  👤 Author: ${GITLAB_USER_NAME}"
-    - echo "  💬 Message: ${CI_COMMIT_MESSAGE}"
-    - echo "  📅 Date: $(date)"
-    - echo "  🔗 Pipeline: ${CI_PIPELINE_URL}"
-    - echo ""
-    - echo "✅ Stages Completed:"
-    - echo "  • BUILD: Docker images created"
-    - echo "  • TEST: Code quality validated"
-    - echo "  • DOCS: Documentation generated"
-    - echo ""
-    - echo "📦 Artifacts Generated:"
-    - echo "  • data-export-image.tar (2 hours retention)"
-    - echo "  • dbt-image.tar (2 hours retention)"
-    - echo "  • Compiled dbt models (7 days retention)"
-    - echo "  • dbt documentation (30 days retention)"
-    - echo ""
-    - echo "🚀 Next Steps:"
-    - echo "  1. Download artifacts from this pipeline"
-    - echo "  2. Deploy to cluster: ./scripts/run-complete-workflow.sh"
-    - echo "  3. View dbt docs: ./scripts/run-dbt.sh 'docs serve'"
-    - echo "  4. Run queries: ./scripts/run-sample-queries.sh"
-    - echo ""
-    - echo "📝 Local Deployment Commands:"
-    - echo "  # Setup infrastructure"
-    - echo "  ./scripts/setup.sh"
-    - echo ""
-    - echo "  # Run complete pipeline"
-    - echo "  ./scripts/run-complete-workflow.sh"
-    - echo ""
-    - echo "  # Interactive SQL session"
-    - echo "  kubectl exec -it -n ecommerce-pipeline \\"
-    - echo "    \$(kubectl get pod -n ecommerce-pipeline -l app=postgresql -o jsonpath=\"{.items[0].metadata.name}\") \\"
-    - echo "    -- psql -U ecommerceuser -d ecommerce_dw"
-    - echo ""
+    - |
+      echo "================================================"
+      echo "Pipeline Completed Successfully"
+      echo "================================================"
+      echo ""
+      echo "Commit: ${CI_COMMIT_SHORT_SHA}"
+      echo "Branch: ${CI_COMMIT_REF_NAME}"
+      echo "Author: ${GITLAB_USER_NAME}"
+      echo ""
+      echo "Artifacts Generated:"
+      echo "- data-export-image.tar"
+      echo "- dbt-image.tar"
+      echo "- dbt compiled models"
+      echo "- dbt documentation"
+      echo ""
+      echo "Next Steps:"
+      echo "1. Deploy: ./scripts/setup.sh"
+      echo "2. Run Pipeline: ./scripts/run-complete-workflow.sh"
+      echo "3. View Docs: ./scripts/run-dbt.sh docs serve"
   when: on_success
   only:
     - main
@@ -237,53 +210,14 @@ pipeline:failure:
   stage: .post
   image: alpine:latest
   script:
-    - echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    - echo "❌ Pipeline Failed"
-    - echo "━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━━"
-    - echo ""
-    - echo "Pipeline Information:"
-    - echo "  📦 Commit: ${CI_COMMIT_SHORT_SHA}"
-    - echo "  🌿 Branch: ${CI_COMMIT_REF_NAME}"
-    - echo "  🔗 Pipeline: ${CI_PIPELINE_URL}"
-    - echo ""
-    - echo "🔍 Troubleshooting Steps:"
-    - echo "  1. Check job logs in GitLab UI"
-    - echo "  2. Verify Dockerfile syntax"
-    - echo "  3. Validate YAML files locally"
-    - echo "  4. Test dbt models: dbt parse && dbt compile"
-    - echo ""
+    - |
+      echo "================================================"
+      echo "Pipeline Failed"
+      echo "================================================"
+      echo ""
+      echo "Check job logs for details"
+      echo "Pipeline URL: ${CI_PIPELINE_URL}"
   when: on_failure
   only:
     - main
     - develop
-
-# ============================================
-# NOTES FOR DEPLOYMENT & TRANSFORM STAGES
-# ============================================
-
-# The following stages require local execution with cluster access:
-#
-# DEPLOY STAGE (Run locally):
-#   ./scripts/setup.sh
-#   - Creates Kubernetes namespace
-#   - Deploys PostgreSQL and MinIO
-#   - Creates secrets
-#   - Loads Docker images to cluster
-#
-# TRANSFORM STAGE (Run locally):
-#   ./scripts/run-complete-workflow.sh
-#   - Loads data from API
-#   - Runs dbt transformations
-#   - Executes data quality tests
-#   - Generates analytics tables
-#
-# These stages are separated from CI/CD because they require:
-#   • kubectl access to Kubernetes cluster
-#   • Cluster credentials
-#   • Network access to cluster
-#
-# In production, these would be handled by:
-#   • GitLab Runner with cluster access
-#   • ArgoCD for GitOps deployments
-#   • Kubernetes operators
-#   • Or integrated into existing deployment pipelines
