@@ -1,0 +1,18 @@
+name: 'ecommerce'
+version: '1.0.0'
+config-version: 2
+
+profile: 'ecommerce'
+
+model-paths: ["models"]
+test-paths: ["tests"]
+macro-paths: ["macros"]
+
+models:
+  ecommerce:
+    +materialized: table
+    
+    # Incremental model configuration
+    fct_daily_sales:
+      +materialized: incremental
+      +on_schema_change: "append_new_columns"

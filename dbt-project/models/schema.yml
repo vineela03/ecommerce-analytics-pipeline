@@ -1,0 +1,111 @@
+version: 2
+
+models:
+  - name: dim_products
+    columns:
+      - name: product_id
+        tests:
+          - unique
+          - not_null
+
+  - name: dim_users
+    columns:
+      - name: user_id
+        tests:
+          - unique
+          - not_null
+      - name: email
+        tests:
+          - unique
+          - not_null
+  - name: fct_carts
+    columns:
+      - name: cart_id
+        tests:
+          - unique
+          - not_null
+      - name: user_id
+        tests:
+          - not_null
+          - relationships:
+              to: ref('dim_users')
+              field: user_id
+        tests:
+          - not_null
+  - name: fct_daily_sales
+    description: |
+      Daily sales summary with incremental updates.
+    columns:
+      - name: sale_date
+        description: "Date of sales activity"
+        tests:
+          - not_null
+      
+      - name: total_carts
+        description: "Total number of carts created"
+        tests:
+          - not_null
+      
+      - name: unique_customers
+        description: "Number of unique customers"
+        tests:
+          - not_null
+
+  - name: dim_user_segments
+    description: |
+      User segmentation with RFM (Recency, Frequency, Monetary) analysis.
+    columns:
+      - name: user_id
+        description: "Unique user identifier"
+        tests:
+          - unique
+          - not_null
+      
+      - name: user_segment
+        description: "Customer segment classification"
+        tests:
+          - not_null
+      
+      - name: rfm_total_score
+        description: "Combined RFM score (3-15)"
+        tests:
+          - not_null
+
+  - name: fct_category_performance
+    description: |
+      Category-level performance metrics.
+      
+      **Business Use**: Category management and inventory decisions
+    columns:
+      - name: category
+        description: "Product category"
+        tests:
+          - unique
+          - not_null
+      
+      - name: product_count
+        description: "Number of products in category"
+        tests:
+          - not_null
+
+  - name: dim_product_rankings
+    description: |
+      Product rankings and performance tiers.
+      
+      **Business Use**: Product recommendations and promotions
+    columns:
+      - name: product_id
+        description: "Unique product identifier"
+        tests:
+          - unique
+          - not_null
+      
+      - name: price_tier
+        description: "Price positioning"
+        tests:
+          - not_null
+      
+      - name: rating_tier
+        description: "Quality tier based on ratings"
+        tests:
+          - not_null

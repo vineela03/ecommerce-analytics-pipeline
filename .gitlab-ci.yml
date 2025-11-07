@@ -1,0 +1,390 @@
+# GitLab CI/CD Pipeline for E-Commerce Customer Intelligence Pipeline
+
+stages:
+  - build
+  - test
+  - deploy
+  - transform
+
+variables:
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: ""
+  K3D_CLUSTER_NAME: pipeline
+  NAMESPACE: ecommerce-pipeline
+
+# ============================================
+# BUILD STAGE
+# ============================================
+
+build:data-export:
+  stage: build
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  script:
+    - echo "Building data-export Docker image..."
+    - cd data-export
+    - docker build -t data-export:${CI_COMMIT_SHORT_SHA} -t data-export:latest .
+    - docker save data-export:latest -o ../data-export-image.tar
+  artifacts:
+    paths:
+      - data-export-image.tar
+    expire_in: 1 hour
+  tags:
+    - docker
+  only:
+    changes:
+      - data-export/**/*
+      - .gitlab-ci.yml
+
+build:dbt:
+  stage: build
+  image: docker:24.0.5
+  services:
+    - docker:24.0.5-dind
+  script:
+    - echo "Building dbt Docker image..."
+    - cd dbt-project
+    - docker build -t dbt:${CI_COMMIT_SHORT_SHA} -t dbt:latest .
+    - docker save dbt:latest -o ../dbt-image.tar
+  artifacts:
+    paths:
+      - dbt-image.tar
+    expire_in: 1 hour
+  tags:
+    - docker
+  only:
+    changes:
+      - dbt-project/**/*
+      - .gitlab-ci.yml
+
+# ============================================
+# TEST STAGE
+# ============================================
+
+test:dbt-compile:
+  stage: test
+  image: ghcr.io/dbt-labs/dbt-postgres:1.9.0
+  before_script:
+    - cd dbt-project
+    - export POSTGRES_HOST=postgres
+    - export POSTGRES_PORT=5432
+    - export POSTGRES_USER=test_user
+    - export POSTGRES_PASSWORD=test_pass
+    - export POSTGRES_DB=test_db
+  script:
+    - echo "Compiling dbt models..."
+    - dbt deps || echo "No dependencies"
+    - dbt compile --target test
+  artifacts:
+    paths:
+      - dbt-project/target/
+    expire_in: 1 hour
+  tags:
+    - docker
+  only:
+    changes:
+      - dbt-project/**/*
+      - .gitlab-ci.yml
+
+test:dbt-parse:
+  stage: test
+  image: ghcr.io/dbt-labs/dbt-postgres:1.9.0
+  before_script:
+    - cd dbt-project
+  script:
+    - echo "Parsing dbt project..."
+    - dbt parse
+  tags:
+    - docker
+  only:
+    changes:
+      - dbt-project/**/*
+      - .gitlab-ci.yml
+
+# ============================================
+# DEPLOY STAGE
+# ============================================
+
+deploy:infrastructure:
+  stage: deploy
+  image: alpine/k8s:1.28.3
+  before_script:
+    - apk add --no-cache bash curl
+  script:
+    - echo "Deploying Kubernetes infrastructure..."
+    
+    # Create namespace
+    - kubectl apply -f kubernetes/namespace.yaml || true
+    
+    # Create secrets
+    - |
+      kubectl create secret generic postgres-secret \
+        --from-literal=user=ecommerceuser \
+        --from-literal=password=SecurePass123 \
+        --from-literal=database=ecommerce_dw \
+        -n ${NAMESPACE} \
+        --dry-run=client -o yaml | kubectl apply -f -
+    
+    - |
+      kubectl create secret generic minio-secret \
+        --from-literal=user=minioadmin \
+        --from-literal=password=MinioPass123 \
+        -n ${NAMESPACE} \
+        --dry-run=client -o yaml | kubectl apply -f -
+    
+    # Deploy PostgreSQL
+    - kubectl apply -f kubernetes/postgresql.yaml
+    
+    # Deploy MinIO
+    - kubectl apply -f kubernetes/minio.yaml
+    
+    # Wait for services
+    - kubectl wait --for=condition=ready pod -l app=postgresql -n ${NAMESPACE} --timeout=120s || true
+    - kubectl wait --for=condition=ready pod -l app=minio -n ${NAMESPACE} --timeout=120s || true
+    
+    - echo "Infrastructure deployed successfully"
+  tags:
+    - kubernetes
+  only:
+    - main
+    - develop
+
+deploy:images:
+  stage: deploy
+  image: alpine/k8s:1.28.3
+  dependencies:
+    - build:data-export
+    - build:dbt
+  before_script:
+    - apk add --no-cache docker-cli
+  script:
+    - echo "Loading Docker images to cluster..."
+    
+    # Load data-export image
+    - |
+      if [ -f data-export-image.tar ]; then
+        docker load -i data-export-image.tar
+        # For k3d: k3d image import data-export:latest -c ${K3D_CLUSTER_NAME}
+        echo "data-export image loaded"
+      fi
+    
+    # Load dbt image
+    - |
+      if [ -f dbt-image.tar ]; then
+        docker load -i dbt-image.tar
+        # For k3d: k3d image import dbt:latest -c ${K3D_CLUSTER_NAME}
+        echo "dbt image loaded"
+      fi
+  tags:
+    - kubernetes
+  only:
+    - main
+    - develop
+
+# ============================================
+# TRANSFORM STAGE
+# ============================================
+
+transform:load-data:
+  stage: transform
+  image: alpine/k8s:1.28.3
+  script:
+    - echo "Loading data from API..."
+    
+    # Run data-export job
+    - |
+      cat <<YAML | kubectl apply -f -
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: data-export-${CI_PIPELINE_ID}
+        namespace: ${NAMESPACE}
+      spec:
+        template:
+          spec:
+            restartPolicy: Never
+            containers:
+            - name: data-export
+              image: data-export:latest
+              imagePullPolicy: Never
+              env:
+              - name: POSTGRES_HOST
+                value: postgresql-service.${NAMESPACE}.svc.cluster.local
+              - name: POSTGRES_USER
+                valueFrom:
+                  secretKeyRef:
+                    name: postgres-secret
+                    key: user
+              - name: POSTGRES_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: postgres-secret
+                    key: password
+              - name: POSTGRES_DB
+                valueFrom:
+                  secretKeyRef:
+                    name: postgres-secret
+                    key: database
+              - name: MINIO_HOST
+                value: minio-service.${NAMESPACE}.svc.cluster.local:9000
+              - name: MINIO_USER
+                valueFrom:
+                  secretKeyRef:
+                    name: minio-secret
+                    key: user
+              - name: MINIO_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: minio-secret
+                    key: password
+      YAML
+    
+    # Wait for job completion
+    - kubectl wait --for=condition=complete job/data-export-${CI_PIPELINE_ID} -n ${NAMESPACE} --timeout=300s
+    
+    - echo "Data loaded successfully"
+  tags:
+    - kubernetes
+  only:
+    - main
+    - develop
+
+transform:dbt-run:
+  stage: transform
+  image: alpine/k8s:1.28.3
+  dependencies:
+    - transform:load-data
+  script:
+    - echo "Running dbt transformations..."
+    
+    # Run dbt job
+    - |
+      cat <<YAML | kubectl apply -f -
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: dbt-run-${CI_PIPELINE_ID}
+        namespace: ${NAMESPACE}
+      spec:
+        template:
+          spec:
+            restartPolicy: Never
+            containers:
+            - name: dbt
+              image: dbt:latest
+              imagePullPolicy: Never
+              command: ["dbt", "run", "--target", "prod"]
+              env:
+              - name: POSTGRES_HOST
+                value: postgresql-service.${NAMESPACE}.svc.cluster.local
+              - name: POSTGRES_PORT
+                value: "5432"
+              - name: POSTGRES_USER
+                valueFrom:
+                  secretKeyRef:
+                    name: postgres-secret
+                    key: user
+              - name: POSTGRES_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: postgres-secret
+                    key: password
+              - name: POSTGRES_DB
+                valueFrom:
+                  secretKeyRef:
+                    name: postgres-secret
+                    key: database
+      YAML
+    
+    # Wait for completion
+    - kubectl wait --for=condition=complete job/dbt-run-${CI_PIPELINE_ID} -n ${NAMESPACE} --timeout=300s
+    
+    - echo "dbt run completed successfully"
+  tags:
+    - kubernetes
+  only:
+    - main
+    - develop
+
+transform:dbt-test:
+  stage: transform
+  image: alpine/k8s:1.28.3
+  dependencies:
+    - transform:dbt-run
+  script:
+    - echo "Running dbt tests..."
+    
+    # Run dbt test job
+    - |
+      cat <<YAML | kubectl apply -f -
+      apiVersion: batch/v1
+      kind: Job
+      metadata:
+        name: dbt-test-${CI_PIPELINE_ID}
+        namespace: ${NAMESPACE}
+      spec:
+        template:
+          spec:
+            restartPolicy: Never
+            containers:
+            - name: dbt
+              image: dbt:latest
+              imagePullPolicy: Never
+              command: ["dbt", "test", "--target", "prod"]
+              env:
+              - name: POSTGRES_HOST
+                value: postgresql-service.${NAMESPACE}.svc.cluster.local
+              - name: POSTGRES_PORT
+                value: "5432"
+              - name: POSTGRES_USER
+                valueFrom:
+                  secretKeyRef:
+                    name: postgres-secret
+                    key: user
+              - name: POSTGRES_PASSWORD
+                valueFrom:
+                  secretKeyRef:
+                    name: postgres-secret
+                    key: password
+              - name: POSTGRES_DB
+                valueFrom:
+                  secretKeyRef:
+                    name: postgres-secret
+                    key: database
+      YAML
+    
+    # Wait for completion
+    - kubectl wait --for=condition=complete job/dbt-test-${CI_PIPELINE_ID} -n ${NAMESPACE} --timeout=300s
+    
+    - echo "dbt tests passed successfully"
+  tags:
+    - kubernetes
+  only:
+    - main
+    - develop
+
+transform:dbt-docs:
+  stage: transform
+  image: ghcr.io/dbt-labs/dbt-postgres:1.9.0
+  dependencies:
+    - transform:dbt-run
+  before_script:
+    - cd dbt-project
+    - export POSTGRES_HOST=postgresql-service.${NAMESPACE}.svc.cluster.local
+    - export POSTGRES_PORT=5432
+    - export POSTGRES_USER=ecommerceuser
+    - export POSTGRES_PASSWORD=SecurePass123
+    - export POSTGRES_DB=ecommerce_dw
+  script:
+    - echo "Generating dbt documentation..."
+    - dbt docs generate --target prod
+  artifacts:
+    paths:
+      - dbt-project/target/
+    expire_in: 30 days
+  tags:
+    - docker
+  only:
+    - main
+    - develop

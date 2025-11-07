@@ -1,0 +1,37 @@
+-- Uses macros: generate_timestamp_column()
+
+{{
+    config(
+        materialized='incremental',
+        unique_key='sale_date'
+    )
+}}
+
+WITH daily_carts AS (
+    SELECT
+        DATE(cart_date) as sale_date,
+        COUNT(DISTINCT cart_id) as total_carts,
+        COUNT(DISTINCT user_id) as unique_customers,
+        SUM(total_items) as total_items_sold
+    FROM {{ ref('fct_carts') }}
+    {% if is_incremental() %}
+        WHERE DATE(cart_date) > (SELECT MAX(sale_date) FROM {{ this }})
+    {% endif %}
+    GROUP BY DATE(cart_date)
+)
+
+SELECT
+    sale_date,
+    total_carts,
+    unique_customers,
+    total_items_sold,
+    
+    -- Division with null handling
+    ROUND(total_items_sold::NUMERIC / NULLIF(total_carts, 0), 2) as avg_items_per_cart,
+    ROUND(total_carts::NUMERIC / NULLIF(unique_customers, 0), 2) as avg_carts_per_customer,
+    
+    -- Using timestamp macro for consistency
+    {{ generate_timestamp_column() }}
+    
+FROM daily_carts
+ORDER BY sale_date DESC
