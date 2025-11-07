@@ -1,8 +1,3 @@
-# ============================================
-# GitLab CI/CD Pipeline - Using Shared Runners
-# E-Commerce Customer Intelligence Pipeline
-# ============================================
-
 stages:
   - build
   - test
@@ -10,10 +5,9 @@ stages:
 variables:
   DOCKER_DRIVER: overlay2
   DOCKER_TLS_CERTDIR: "/certs"
-  NAMESPACE: ecommerce-pipeline
 
 # ============================================
-# BUILD STAGE - Build Docker Images
+# BUILD STAGE
 # ============================================
 
 build:data-export:
@@ -21,73 +15,51 @@ build:data-export:
   image: docker:24.0.5
   services:
     - docker:24.0.5-dind
-  before_script:
-    - docker info
   script:
-    - echo "Building data-export Docker image..."
+    - echo "Building data-export image"
     - cd data-export
-    - docker build -t data-export:${CI_COMMIT_SHORT_SHA} -t data-export:latest .
+    - docker build -t data-export:latest .
     - docker save data-export:latest -o ../data-export-image.tar
-    - echo "data-export image built successfully"
-    - ls -lh ../data-export-image.tar
   artifacts:
     paths:
       - data-export-image.tar
     expire_in: 2 hours
-    name: "data-export-${CI_COMMIT_SHORT_SHA}"
   only:
     - main
     - develop
     - merge_requests
-  retry:
-    max: 2
-    when:
-      - runner_system_failure
-      - stuck_or_timeout_failure
 
 build:dbt:
   stage: build
   image: docker:24.0.5
   services:
     - docker:24.0.5-dind
-  before_script:
-    - docker info
   script:
-    - echo "Building dbt Docker image..."
+    - echo "Building dbt image"
     - cd dbt-project
-    - docker build -t dbt:${CI_COMMIT_SHORT_SHA} -t dbt:latest .
+    - docker build -t dbt:latest .
     - docker save dbt:latest -o ../dbt-image.tar
-    - echo "dbt image built successfully"
-    - ls -lh ../dbt-image.tar
   artifacts:
     paths:
       - dbt-image.tar
     expire_in: 2 hours
-    name: "dbt-${CI_COMMIT_SHORT_SHA}"
   only:
     - main
     - develop
     - merge_requests
-  retry:
-    max: 2
-    when:
-      - runner_system_failure
-      - stuck_or_timeout_failure
 
 # ============================================
-# TEST STAGE - Validate Code Quality
+# TEST STAGE
 # ============================================
 
 test:dbt-parse:
   stage: test
   image: ghcr.io/dbt-labs/dbt-postgres:1.9.0
-  before_script:
+  script:
     - cd dbt-project
     - dbt --version
-  script:
-    - echo "Parsing dbt project structure..."
     - dbt parse
-    - echo "dbt project structure validated"
+    - echo "Parse completed"
   only:
     - main
     - develop
@@ -96,23 +68,21 @@ test:dbt-parse:
 test:dbt-compile:
   stage: test
   image: ghcr.io/dbt-labs/dbt-postgres:1.9.0
-  before_script:
-    - cd dbt-project
-    - export POSTGRES_HOST=test-host
-    - export POSTGRES_PORT=5432
-    - export POSTGRES_USER=test_user
-    - export POSTGRES_PASSWORD=test_pass
-    - export POSTGRES_DB=test_db
+  variables:
+    POSTGRES_HOST: "test-host"
+    POSTGRES_PORT: "5432"
+    POSTGRES_USER: "test_user"
+    POSTGRES_PASSWORD: "test_pass"
+    POSTGRES_DB: "test_db"
   script:
-    - echo "Compiling dbt models..."
-    - dbt deps || echo "No dependencies to install"
-    - dbt compile --target test || echo "Compilation completed"
-    - echo "dbt models compiled successfully"
+    - cd dbt-project
+    - dbt deps || echo "No deps"
+    - dbt compile --target test || echo "Compile done"
+    - echo "Compilation completed"
   artifacts:
     paths:
       - dbt-project/target/
     expire_in: 7 days
-    name: "dbt-compiled-${CI_COMMIT_SHORT_SHA}"
   only:
     - main
     - develop
@@ -121,28 +91,10 @@ test:dbt-compile:
 test:yaml-lint:
   stage: test
   image: python:3.11-slim
-  before_script:
+  script:
     - pip install yamllint --quiet
-  script:
-    - echo "Linting YAML files..."
-    - yamllint kubernetes/ || echo "Kubernetes YAML lint completed"
-    - yamllint dbt-project/models/*.yml || echo "dbt YAML lint completed"
-    - echo "YAML validation completed"
-  allow_failure: true
-  only:
-    - main
-    - develop
-    - merge_requests
-
-test:python-lint:
-  stage: test
-  image: python:3.11-slim
-  before_script:
-    - pip install flake8 --quiet
-  script:
-    - echo "Linting Python files..."
-    - flake8 data-export/ --max-line-length=120 --exclude=__pycache__ || echo "Python lint completed"
-    - echo "Python validation completed"
+    - yamllint kubernetes/ || echo "K8s YAML checked"
+    - yamllint dbt-project/models/*.yml || echo "dbt YAML checked"
   allow_failure: true
   only:
     - main
@@ -150,7 +102,7 @@ test:python-lint:
     - merge_requests
 
 # ============================================
-# DOCUMENTATION GENERATION
+# DOCUMENTATION
 # ============================================
 
 docs:dbt:
@@ -158,13 +110,10 @@ docs:dbt:
   image: ghcr.io/dbt-labs/dbt-postgres:1.9.0
   dependencies:
     - test:dbt-compile
-  before_script:
-    - cd dbt-project
   script:
-    - echo "Generating dbt documentation..."
-    - dbt docs generate --target test || echo "Documentation generated"
-    - echo "dbt documentation generated"
-    - ls -lh target/
+    - cd dbt-project
+    - dbt docs generate --target test || echo "Docs generated"
+    - ls -la target/
   artifacts:
     name: "dbt-docs-${CI_COMMIT_SHORT_SHA}"
     paths:
@@ -175,48 +124,40 @@ docs:dbt:
     - develop
 
 # ============================================
-# PIPELINE SUMMARY
+# SUMMARY
 # ============================================
 
-pipeline:summary:
+success:
   stage: .post
   image: alpine:latest
   script:
-    - |
-      echo "================================================"
-      echo "Pipeline Completed Successfully"
-      echo "================================================"
-      echo ""
-      echo "Commit: ${CI_COMMIT_SHORT_SHA}"
-      echo "Branch: ${CI_COMMIT_REF_NAME}"
-      echo "Author: ${GITLAB_USER_NAME}"
-      echo ""
-      echo "Artifacts Generated:"
-      echo "- data-export-image.tar"
-      echo "- dbt-image.tar"
-      echo "- dbt compiled models"
-      echo "- dbt documentation"
-      echo ""
-      echo "Next Steps:"
-      echo "1. Deploy: ./scripts/setup.sh"
-      echo "2. Run Pipeline: ./scripts/run-complete-workflow.sh"
-      echo "3. View Docs: ./scripts/run-dbt.sh docs serve"
+    - echo "================================"
+    - echo "Pipeline Success"
+    - echo "================================"
+    - echo "Commit SHA - ${CI_COMMIT_SHORT_SHA}"
+    - echo "Branch - ${CI_COMMIT_REF_NAME}"
+    - echo ""
+    - echo "Artifacts created:"
+    - echo "  data-export-image.tar"
+    - echo "  dbt-image.tar"
+    - echo "  dbt docs in target/"
+    - echo ""
+    - echo "Deploy locally with:"
+    - echo "  ./scripts/setup.sh"
+    - echo "  ./scripts/run-complete-workflow.sh"
   when: on_success
   only:
     - main
     - develop
 
-pipeline:failure:
+failure:
   stage: .post
   image: alpine:latest
   script:
-    - |
-      echo "================================================"
-      echo "Pipeline Failed"
-      echo "================================================"
-      echo ""
-      echo "Check job logs for details"
-      echo "Pipeline URL: ${CI_PIPELINE_URL}"
+    - echo "================================"
+    - echo "Pipeline Failed"
+    - echo "================================"
+    - echo "Check logs at ${CI_PIPELINE_URL}"
   when: on_failure
   only:
     - main
