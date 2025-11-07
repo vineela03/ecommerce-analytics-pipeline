@@ -1,6 +1,11 @@
 stages:
   - build
   - test
+  - docs
+
+variables:
+  DOCKER_DRIVER: overlay2
+  DOCKER_TLS_CERTDIR: "/certs"
 
 build_data_export:
   stage: build
@@ -26,34 +31,36 @@ build_dbt:
     - main
     - develop
 
-test_parse:
+test_dbt_parse:
   stage: test
   image: ghcr.io/dbt-labs/dbt-postgres:1.9.0
   variables:
     POSTGRES_HOST: localhost
     POSTGRES_PORT: "5432"
-    POSTGRES_USER: test
-    POSTGRES_PASSWORD: test
-    POSTGRES_DB: test
+    POSTGRES_USER: test_user
+    POSTGRES_PASSWORD: test_pass
+    POSTGRES_DB: test_db
+    DBT_PROFILES_DIR: /builds/$CI_PROJECT_PATH/dbt-project
   script:
-    - cd dbt-project
-    - dbt parse
+    - cd dbt-project && dbt --version
+    - cd dbt-project && dbt parse
   only:
     - main
     - develop
 
-test_compile:
+test_dbt_compile:
   stage: test
   image: ghcr.io/dbt-labs/dbt-postgres:1.9.0
   variables:
     POSTGRES_HOST: localhost
     POSTGRES_PORT: "5432"
-    POSTGRES_USER: test
-    POSTGRES_PASSWORD: test
-    POSTGRES_DB: test
+    POSTGRES_USER: test_user
+    POSTGRES_PASSWORD: test_pass
+    POSTGRES_DB: test_db
+    DBT_PROFILES_DIR: /builds/$CI_PROJECT_PATH/dbt-project
   script:
-    - cd dbt-project
-    - dbt compile --target test
+    - cd dbt-project && dbt deps
+    - cd dbt-project && dbt compile --target test
   allow_failure: true
   artifacts:
     paths:
@@ -63,23 +70,47 @@ test_compile:
     - main
     - develop
 
-generate_docs:
+test_yaml_lint:
   stage: test
+  image: python:3.11-slim
+  script:
+    - pip install yamllint
+    - yamllint kubernetes/ || true
+  allow_failure: true
+  only:
+    - main
+    - develop
+
+generate_dbt_docs:
+  stage: docs
   image: ghcr.io/dbt-labs/dbt-postgres:1.9.0
   variables:
     POSTGRES_HOST: localhost
     POSTGRES_PORT: "5432"
-    POSTGRES_USER: test
-    POSTGRES_PASSWORD: test
-    POSTGRES_DB: test
+    POSTGRES_USER: test_user
+    POSTGRES_PASSWORD: test_pass
+    POSTGRES_DB: test_db
+    DBT_PROFILES_DIR: /builds/$CI_PROJECT_PATH/dbt-project
+  dependencies:
+    - test_dbt_compile
   script:
-    - cd dbt-project
-    - dbt docs generate --target test
+    - cd dbt-project && dbt docs generate --target test
   allow_failure: true
   artifacts:
     paths:
       - dbt-project/target/
     expire_in: 30 days
+  only:
+    - main
+    - develop
+
+success_summary:
+  stage: .post
+  image: alpine:latest
+  script:
+    - echo "Pipeline Success"
+    - echo "Commit - ${CI_COMMIT_SHORT_SHA}"
+  when: on_success
   only:
     - main
     - develop
