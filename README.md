@@ -1,4 +1,3 @@
-cat > README.md << 'EOF'
 # 🚀 E-Commerce Customer Intelligence & Analytics Pipeline
 
 > **Data Analytics Processing & Storage for customer segmentation, behavioral analytics, and retail intelligence**
@@ -161,8 +160,9 @@ kubectl exec -n ecommerce-pipeline \
   $(kubectl get pod -n ecommerce-pipeline -l app=postgresql -o jsonpath="{.items[0].metadata.name}") \
   -- psql -U ecommerceuser -d ecommerce_dw -c "SELECT * FROM analytics.dim_user_segments LIMIT 10;"
 ```
-![Expected output](images/Data_Sample.png "Sample execution")
-# Sample data retrieved. 🎉
+![Expected output](images/Data_Sample.png)
+
+Sample data retrieved. 🎉
 
 ---
 
@@ -905,7 +905,7 @@ ORDER BY segment_tier, customer_count DESC;
 
 **Expected Output**:
 ```
-![Segements](images/Segments.png "Sample segments")
+![Segements](images/Segmentation.png)
 ```
 
 **Business Insights**:
@@ -1084,7 +1084,7 @@ ecommerce-customer-intelligence/
 
 ---
 
-**🚀 Ready to build amazing data products? Let's go!**
+** To execute manually **
 ```bash
 # Start your journey
 ./scripts/setup.sh
